@@ -121,3 +121,7 @@ For an in-depth breakdown of assembly trampolines, KPADRead sample synthesis, me
 
 - **Vague Rant**: Original Classic Controller Gecko codes, pitstop skips, and widescreen FOV patches.
 - **quatric**: Patch suite architecture, GameCube controller hardware injection, DOL static injector, Riivolution definitions, and desktop UI patcher.
+
+### Modded images
+
+Disc patchers match the first four characters of the game ID (ID4), so mods can change the last two characters. The original disc ID and filename are preserved. Revision and executable patch-site checks still apply; mods that change required code may be incompatible.

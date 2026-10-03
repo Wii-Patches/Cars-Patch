@@ -17,6 +17,7 @@ if HERE not in sys.path:
 import features
 import patcher
 from dol import Dol
+from disc_ids import match_disc_id
 from regions import ALL_REGIONS, GAMES
 
 
@@ -69,12 +70,12 @@ def run_patch(image_path, log, done, which=('cc', 'gc', 'pitstop', 'fov'), ios=N
             if not got:
                 raise RuntimeError('could not read sys/boot.bin from the extracted disc')
             disc_id, disc_ver = got
-            if disc_id not in ALL_REGIONS:
+            region = match_disc_id(disc_id, ALL_REGIONS)
+            if region is None:
                 raise RuntimeError('%s is not a recognized Cars trilogy release.\n\n'
                                    'Supported:\n%s' % (disc_id, '\n'.join(
                                        '  %s: %s' % (k, v['label']) for k, v in ALL_REGIONS.items())))
 
-            region = disc_id
             reg_info = ALL_REGIONS[region]
             log('disc: %s (%s)' % (region, reg_info['label']))
 
