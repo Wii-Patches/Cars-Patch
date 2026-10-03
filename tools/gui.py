@@ -5,6 +5,7 @@ Supports drag-and-drop or file browsing for WBFS / ISO disc images or main.dol f
 Provides options for Classic Controller, GameCube Controller, Pitstop Skip, and FOV fixes.
 """
 import os
+import queue
 import sys
 import threading
 import tkinter as tk
@@ -20,90 +21,108 @@ import patcher
 from dol import Dol
 from regions import ALL_REGIONS, GAMES, game_for_region
 
+try:
+    from tkinterdnd2 import DND_FILES, TkinterDnD
+    BASE = TkinterDnD.Tk
+    HAVE_DND = True
+except ImportError:
+    BASE = tk.Tk
+    HAVE_DND = False
 
-class CarsPatcherApp(tk.Tk):
+
+def asset_path(filename):
+    if getattr(sys, 'frozen', False):
+        base = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+        p = os.path.join(base, 'assets', filename)
+        if os.path.exists(p):
+            return p
+        p = os.path.join(base, filename)
+        if os.path.exists(p):
+            return p
+    return os.path.join(HERE, '..', 'assets', filename)
+
+
+class CarsPatcherApp(BASE):
     def __init__(self):
         super().__init__()
         self.title("Cars Trilogy Wii Patcher")
-        self.geometry("640x660")
-        self.minsize(580, 600)
+        self.geometry("580x680")
+        self.minsize(540, 620)
 
         # State
         self.file_path = None
         self.is_disc = False
         self.region_id = None
         self.feature_vars = {}
+        self.busy = False
 
         self._build_ui()
 
     def _build_ui(self):
-        # 1. Header / Logo Banner
-        banner_frame = tk.Frame(self, bg="#111", height=100)
-        banner_frame.pack(fill=tk.X)
-
-        logo_path = os.path.join(HERE, '..', 'assets', 'logo.png')
-        if os.path.exists(logo_path):
+        # 1. Header / Logo Banner (Aspect-Ratio Preserving)
+        banner_path = asset_path('logo.png')
+        if os.path.exists(banner_path):
             try:
-                self.logo_img = tk.PhotoImage(file=logo_path)
-                logo_lbl = tk.Label(banner_frame, image=self.logo_img, bg="#111")
-                logo_lbl.pack(side=tk.LEFT, padx=15, pady=10)
+                raw_img = tk.PhotoImage(file=banner_path)
+                # Keep original aspect ratio (539x348): subsample uniformly by 2 -> 270x174
+                sub_factor = max(1, raw_img.width() // 270)
+                self.logo_img = raw_img.subsample(sub_factor, sub_factor)
+                logo_lbl = tk.Label(self, image=self.logo_img)
+                logo_lbl.pack(pady=(12, 4))
             except Exception:
                 pass
 
-        header_text_frame = tk.Frame(banner_frame, bg="#111")
-        header_text_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, pady=15)
+        title_lbl = tk.Label(self, text="Disney-Pixar Cars Trilogy · Wii",
+                             font=("TkDefaultFont", 12, "bold"))
+        title_lbl.pack(pady=(0, 2))
+        sub_lbl = tk.Label(self, text="Classic Controller & GameCube Controller Suite (Cars 1, 2, 3)",
+                           font=("TkDefaultFont", 10), fg="#555")
+        sub_lbl.pack(pady=(0, 8))
 
-        title_lbl = tk.Label(header_text_frame, text="Cars Trilogy Wii Patcher",
-                             font=("Helvetica", 18, "bold"), fg="#FFF", bg="#111")
-        title_lbl.pack(anchor=tk.W)
-        sub_lbl = tk.Label(header_text_frame,
-                           text="Classic Controller & GameCube Controller Suite (Cars 1, 2, 3)",
-                           font=("Helvetica", 11), fg="#BBB", bg="#111")
-        sub_lbl.pack(anchor=tk.W)
-
-        # 2. File Selection Frame
-        file_frame = tk.LabelFrame(self, text=" Target Disc Image or main.dol ", font=("Helvetica", 11, "bold"), padx=12, pady=10)
-        file_frame.pack(fill=tk.X, padx=15, pady=10)
-
-        self.path_entry = tk.Entry(file_frame, font=("Helvetica", 11))
-        self.path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
-
-        browse_btn = tk.Button(file_frame, text="Browse...", command=self._browse_file, font=("Helvetica", 10, "bold"))
-        browse_btn.pack(side=tk.RIGHT)
-
-        # Info label
-        self.info_lbl = tk.Label(file_frame, text="Please select a Cars WBFS, ISO, or main.dol file.",
-                                 font=("Helvetica", 10, "italic"), fg="#555")
-        self.info_lbl.pack(fill=tk.X, anchor=tk.W, pady=(8, 0))
-
-        # 3. Patch Options Frame
-        self.opt_frame = tk.LabelFrame(self, text=" Patch Options ", font=("Helvetica", 11, "bold"), padx=12, pady=10)
-        self.opt_frame.pack(fill=tk.X, padx=15, pady=5)
+        # 2. Options Frame
+        opts_frame = tk.LabelFrame(self, text=" Add Support For ", padx=12, pady=8)
+        opts_frame.pack(fill=tk.X, padx=14, pady=4)
 
         for fkey in features.FEATURES:
             var = tk.BooleanVar(value=True)
             self.feature_vars[fkey] = var
-            cb = tk.Checkbutton(self.opt_frame, text=features.TITLES[fkey], variable=var,
-                                font=("Helvetica", 11), anchor=tk.W)
-            cb.pack(fill=tk.X, anchor=tk.W, pady=2)
-            desc_lbl = tk.Label(self.opt_frame, text=f"    {features.DESCRIPTIONS[fkey]}",
-                                font=("Helvetica", 9), fg="#666", anchor=tk.W)
+            cb = tk.Checkbutton(opts_frame, text=features.TITLES[fkey], variable=var,
+                                font=("TkDefaultFont", 10, "bold"), anchor=tk.W)
+            cb.pack(fill=tk.X, anchor=tk.W, pady=(2, 0))
+            desc_lbl = tk.Label(opts_frame, text=f"    {features.DESCRIPTIONS[fkey]}",
+                                font=("TkDefaultFont", 9), fg="#666", anchor=tk.W)
             desc_lbl.pack(fill=tk.X, anchor=tk.W, pady=(0, 4))
+
+        # 3. Drop / Pick Target Area
+        hint = ("Drop a .wbfs, .iso, or main.dol here\n\n(or click to browse)"
+                if HAVE_DND else "Click to choose a .wbfs, .iso, or main.dol")
+        self.drop_lbl = tk.Label(self, text=hint, relief="ridge", bd=2,
+                                 padx=10, pady=22, cursor="hand2", font=("TkDefaultFont", 10))
+        self.drop_lbl.pack(fill=tk.X, padx=14, pady=10)
+        self.drop_lbl.bind("<Button-1>", lambda e: self._browse_file())
+
+        if HAVE_DND:
+            self.drop_lbl.drop_target_register(DND_FILES)
+            self.drop_lbl.dnd_bind("<<Drop>>", self._on_drop)
+
+        # Info Note
+        note_lbl = tk.Label(self, text="The original image is kept alongside as <name>.bak",
+                            font=("TkDefaultFont", 9), fg="#666")
+        note_lbl.pack()
 
         # 4. Action Button
         btn_frame = tk.Frame(self)
-        btn_frame.pack(fill=tk.X, padx=15, pady=10)
+        btn_frame.pack(fill=tk.X, padx=14, pady=(6, 8))
 
         self.patch_btn = tk.Button(btn_frame, text="Apply Patches", command=self._start_patching,
-                                   bg="#007ACC", fg="#FFF", font=("Helvetica", 13, "bold"),
-                                   state=tk.DISABLED, pady=6)
+                                   font=("TkDefaultFont", 11, "bold"), state=tk.DISABLED, pady=5)
         self.patch_btn.pack(fill=tk.X)
 
-        # 5. Log Console
-        log_frame = tk.LabelFrame(self, text=" Output Log ", font=("Helvetica", 10, "bold"), padx=8, pady=6)
-        log_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=(0, 15))
+        # 5. Output Log
+        log_frame = tk.LabelFrame(self, text=" Output Log ", padx=8, pady=6)
+        log_frame.pack(fill=tk.BOTH, expand=True, padx=14, pady=(0, 12))
 
-        self.log_text = tk.Text(log_frame, wrap=tk.WORD, font=("Consolas", 10), height=8, bg="#F9F9F9")
+        self.log_text = tk.Text(log_frame, wrap=tk.WORD, font=("Consolas", 9), height=7, bg="#F9F9F9")
         self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         scrollbar = tk.Scrollbar(log_frame, command=self.log_text.yview)
@@ -114,7 +133,14 @@ class CarsPatcherApp(tk.Tk):
         self.log_text.insert(tk.END, text + "\n")
         self.log_text.see(tk.END)
 
+    def _on_drop(self, event):
+        paths = self.tk.splitlist(event.data)
+        if paths and not self.busy:
+            self._load_file(paths[0])
+
     def _browse_file(self):
+        if self.busy:
+            return
         f = filedialog.askopenfilename(
             title="Select Cars Disc Image or main.dol",
             filetypes=[
@@ -129,17 +155,14 @@ class CarsPatcherApp(tk.Tk):
 
     def _load_file(self, path):
         self.file_path = path
-        self.path_entry.delete(0, tk.END)
-        self.path_entry.insert(0, path)
-
         ext = os.path.splitext(path)[1].lower()
+
         if ext in ('.wbfs', '.iso'):
             self.is_disc = True
-            # Read disc id using wit
             wit_bin = disc.find_wit()
             if not wit_bin:
-                self.log("Note: wit is required to extract and rebuild disc images.")
-            self.info_lbl.config(text=f"Selected Disc: {os.path.basename(path)}", fg="#006600")
+                self.log("Note: wit (Wiimms ISO Tool) is required to extract and rebuild disc images.")
+            self.drop_lbl.config(text=f"Selected Disc:\n{os.path.basename(path)}", fg="#006600")
             self.patch_btn.config(state=tk.NORMAL)
         elif ext == '.dol':
             self.is_disc = False
@@ -149,24 +172,28 @@ class CarsPatcherApp(tk.Tk):
                 if reg:
                     self.region_id = reg
                     meta = ALL_REGIONS[reg]
-                    self.info_lbl.config(text=f"Detected DOL: {reg} - {meta['label']}", fg="#006600")
+                    self.drop_lbl.config(text=f"Detected DOL:\n{reg} - {meta['label']}", fg="#006600")
                     self.patch_btn.config(state=tk.NORMAL)
                 else:
-                    self.info_lbl.config(text="Could not identify Cars region from this main.dol.", fg="#990000")
+                    self.drop_lbl.config(text=f"Could not identify Cars region:\n{os.path.basename(path)}", fg="#990000")
                     self.patch_btn.config(state=tk.DISABLED)
             except Exception as e:
-                self.info_lbl.config(text=f"Error reading DOL: {e}", fg="#990000")
+                self.drop_lbl.config(text=f"Error reading DOL:\n{e}", fg="#990000")
                 self.patch_btn.config(state=tk.DISABLED)
+        else:
+            self.drop_lbl.config(text=f"Unsupported file type:\n{os.path.basename(path)}", fg="#990000")
+            self.patch_btn.config(state=tk.DISABLED)
 
     def _start_patching(self):
-        if not self.file_path:
+        if not self.file_path or self.busy:
             return
 
         selected = [k for k, v in self.feature_vars.items() if v.get()]
         if not selected:
-            messagebox.showwarning("No Patches Selected", "Please tick at least one patch option.")
+            messagebox.showwarning("No Patches Selected", "Please select at least one patch option.")
             return
 
+        self.busy = True
         self.patch_btn.config(state=tk.DISABLED)
         self.log_text.delete(1.0, tk.END)
         self.log("Starting patch process...")
@@ -192,6 +219,7 @@ class CarsPatcherApp(tk.Tk):
 
     def _patch_finished(self, success, result):
         def cb():
+            self.busy = False
             self.patch_btn.config(state=tk.NORMAL)
             if success:
                 messagebox.showinfo("Success", f"Patching completed successfully!\n\nTarget: {result}")
