@@ -1,0 +1,14 @@
+{
+  "feature": "pitstop",
+  "title": "Skip Pitstop Motions",
+  "region": "RCAY78",
+  "ops": [
+    {
+      "t": "patch",
+      "addr": 2147888300,
+      "new": "4800001c",
+      "orig": "408202bc",
+      "note": "Skip Pitstop Motions"
+    }
+  ]
+}
