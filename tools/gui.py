@@ -48,6 +48,7 @@ class CarsPatcherApp(BASE):
         self.title("Cars Trilogy Wii Patcher")
         self.geometry("580x680")
         self.minsize(540, 620)
+        self._set_window_icon()
 
         # State
         self.file_path = None
@@ -57,6 +58,19 @@ class CarsPatcherApp(BASE):
         self.busy = False
 
         self._build_ui()
+
+    def _set_window_icon(self):
+        path = asset_path('logo.png')
+        if not os.path.exists(path):
+            return
+        try:
+            img = tk.PhotoImage(file=path)
+            # Window icons are small; downscale the banner so it isn't cropped/blurry
+            factor = max(1, img.width() // 128)
+            self.icon_img = img.subsample(factor, factor)
+            self.iconphoto(True, self.icon_img)
+        except Exception:
+            pass
 
     def _build_ui(self):
         # 1. Header / Logo Banner (Aspect-Ratio Preserving)
