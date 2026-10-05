@@ -63,43 +63,38 @@ def generate_gecko_for_region(region_id):
         f.write('\n'.join(ini_lines) + '\n')
 
 def generate_riivolution():
-    # Generate unified Riivolution XML for each game in the trilogy
+    # Riivolution matches one game ID (+ disc version) per XML, so emit one
+    # file per retail release; patches only contain that release's addresses.
+    for f in os.listdir(RIIV_DIR):
+        if f.endswith('.xml'):
+            os.remove(os.path.join(RIIV_DIR, f))
     for gkey, ginfo in GAMES.items():
-        xml_path = os.path.join(RIIV_DIR, f"{gkey}.xml")
-        lines = [
-            '<wiidisc version="1">',
-            f'  <id game="{gkey}">',
-        ]
-        for reg in ginfo['regions']:
-            lines.append(f'    <region type="{reg[:3]}" />')
-        lines.append('  </id>')
-        lines.append(f'  <options>')
-        lines.append(f'    <section name="{ginfo["title"]} Patch">')
-
-        for fkey in ginfo['features']:
-            lines.append(f'      <option name="{features.TITLES[fkey]}">')
-            lines.append(f'        <choice name="Enabled">')
-            lines.append(f'          <patch id="{fkey}" />')
-            lines.append(f'        </choice>')
-            lines.append(f'      </option>')
-
-        lines.append('    </section>')
-        lines.append('  </options>')
-
-        for fkey in ginfo['features']:
-            lines.append(f'  <patch id="{fkey}">')
-            for reg in ginfo['regions']:
-                if features.available(fkey, reg):
-                    feat = features.load(fkey, reg)
-                    lines.append(f'    <!-- {reg}: {feat.title} -->')
-                    for el in feat.memory_elements():
-                        lines.append(f'    {el}')
-            lines.append('  </patch>')
-
-        lines.append('</wiidisc>')
-        with open(xml_path, 'w') as f:
-            f.write('\n'.join(lines) + '\n')
-        print(f"Generated Riivolution XML: {os.path.basename(xml_path)}")
+        for reg, rinfo in ginfo['regions'].items():
+            feats = [k for k in ginfo['features'] if features.available(k, reg)]
+            xml_path = os.path.join(RIIV_DIR, f"{reg}.xml")
+            lines = [
+                '<wiidisc version="1">',
+                f'  <id game="{reg[:4]}" developer="{reg[4:]}" version="{rinfo["version"]}" />',
+                '  <options>',
+                f'    <section name="{ginfo["title"]} Patch ({rinfo["short"]})">',
+            ]
+            for fkey in feats:
+                lines += [f'      <option name="{features.TITLES[fkey]}">',
+                          '        <choice name="Enabled">',
+                          f'          <patch id="{fkey}" />',
+                          '        </choice>',
+                          '      </option>']
+            lines += ['    </section>', '  </options>']
+            for fkey in feats:
+                feat = features.load(fkey, reg)
+                lines.append(f'  <patch id="{fkey}">')
+                for el in feat.memory_elements():
+                    lines.append(f'    {el}')
+                lines.append('  </patch>')
+            lines.append('</wiidisc>')
+            with open(xml_path, 'w') as f:
+                f.write('\n'.join(lines) + '\n')
+            print(f"Generated Riivolution XML: {os.path.basename(xml_path)}")
 
 def main():
     for reg_id in ALL_REGIONS:
