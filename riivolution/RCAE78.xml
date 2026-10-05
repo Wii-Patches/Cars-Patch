@@ -1,26 +1,19 @@
-<wiidisc version="1">
-  <id game="RCAE" developer="78" version="0" />
+<!-- Cars (USA): patches by quatric -->
+<wiidisc version="1" root="/">
+  <id game="RCAE78" version="0" />
   <options>
-    <section name="Disney-Pixar Cars Patch (USA)">
-      <option name="Classic Controller Support">
-        <choice name="Enabled">
-          <patch id="cc" />
-        </choice>
+    <section name="Cars (USA)">
+      <option name="Classic Controller Support" default="1">
+        <choice name="Enabled"><patch id="cc" /></choice>
       </option>
-      <option name="GameCube Controller Support (Standalone)">
-        <choice name="Enabled">
-          <patch id="gc" />
-        </choice>
+      <option name="GameCube Controller Support (Standalone)" default="1">
+        <choice name="Enabled"><patch id="gc" /></choice>
       </option>
-      <option name="Skip Pitstop Motions">
-        <choice name="Enabled">
-          <patch id="pitstop" />
-        </choice>
+      <option name="Skip Pitstop Motions" default="1">
+        <choice name="Enabled"><patch id="pitstop" /></choice>
       </option>
-      <option name="Fix Widescreen FOV (hor+)">
-        <choice name="Enabled">
-          <patch id="fov" />
-        </choice>
+      <option name="Fix Widescreen FOV (hor+)" default="1">
+        <choice name="Enabled"><patch id="fov" /></choice>
       </option>
     </section>
   </options>

@@ -73,16 +73,15 @@ def generate_riivolution():
             feats = [k for k in ginfo['features'] if features.available(k, reg)]
             xml_path = os.path.join(RIIV_DIR, f"{reg}.xml")
             lines = [
-                '<wiidisc version="1">',
-                f'  <id game="{reg[:4]}" developer="{reg[4:]}" version="{rinfo["version"]}" />',
+                f'<!-- {rinfo["label"]}: patches by quatric -->',
+                '<wiidisc version="1" root="/">',
+                f'  <id game="{reg}" version="{rinfo["version"]}" />',
                 '  <options>',
-                f'    <section name="{ginfo["title"]} Patch ({rinfo["short"]})">',
+                f'    <section name="{rinfo["label"]}">',
             ]
             for fkey in feats:
-                lines += [f'      <option name="{features.TITLES[fkey]}">',
-                          '        <choice name="Enabled">',
-                          f'          <patch id="{fkey}" />',
-                          '        </choice>',
+                lines += [f'      <option name="{features.TITLES[fkey]}" default="1">',
+                          f'        <choice name="Enabled"><patch id="{fkey}" /></choice>',
                           '      </option>']
             lines += ['    </section>', '  </options>']
             for fkey in feats:

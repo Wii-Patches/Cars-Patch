@@ -1,16 +1,13 @@
-<wiidisc version="1">
-  <id game="RC2X" developer="78" version="0" />
+<!-- Cars: Mater-National (Europe: X): patches by quatric -->
+<wiidisc version="1" root="/">
+  <id game="RC2X78" version="0" />
   <options>
-    <section name="Disney-Pixar Cars: Mater-National Championship Patch (EUR)">
-      <option name="Classic Controller Support">
-        <choice name="Enabled">
-          <patch id="cc" />
-        </choice>
+    <section name="Cars: Mater-National (Europe: X)">
+      <option name="Classic Controller Support" default="1">
+        <choice name="Enabled"><patch id="cc" /></choice>
       </option>
-      <option name="GameCube Controller Support (Standalone)">
-        <choice name="Enabled">
-          <patch id="gc" />
-        </choice>
+      <option name="GameCube Controller Support (Standalone)" default="1">
+        <choice name="Enabled"><patch id="gc" /></choice>
       </option>
     </section>
   </options>

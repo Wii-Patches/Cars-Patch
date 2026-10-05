@@ -1,16 +1,13 @@
-<wiidisc version="1">
-  <id game="R6OE" developer="78" version="0" />
+<!-- Cars Race-O-Rama (USA): patches by quatric -->
+<wiidisc version="1" root="/">
+  <id game="R6OE78" version="0" />
   <options>
-    <section name="Disney-Pixar Cars Race-O-Rama Patch (USA)">
-      <option name="Classic Controller Support">
-        <choice name="Enabled">
-          <patch id="cc" />
-        </choice>
+    <section name="Cars Race-O-Rama (USA)">
+      <option name="Classic Controller Support" default="1">
+        <choice name="Enabled"><patch id="cc" /></choice>
       </option>
-      <option name="GameCube Controller Support (Standalone)">
-        <choice name="Enabled">
-          <patch id="gc" />
-        </choice>
+      <option name="GameCube Controller Support (Standalone)" default="1">
+        <choice name="Enabled"><patch id="gc" /></choice>
       </option>
     </section>
   </options>
