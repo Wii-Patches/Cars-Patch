@@ -29,6 +29,13 @@ REF_DOLS = {
     'R6OE78': os.path.join(HERE, '..', 'work', 'extracted_R6OE78', 'DATA', 'sys', 'main.dol'),
 }
 
+def _c2_payload(words):
+    """A Gecko C2 body already ends in the 00000000 slot that becomes the branch back."""
+    if words[-1] != 0:
+        raise ValueError('C2 body does not end in the branch-back slot')
+    return list(words)
+
+
 def build_cars1_for_region(region_id, tab_name):
     # Determine reference DOL
     ref_dol_path = REF_DOLS.get(region_id, REF_DOLS['RCAE78'])
@@ -53,8 +60,8 @@ def build_cars1_for_region(region_id, tab_name):
             cc_ops.append(Patch(addr, val, cur, 'Classic Controller 06 patch'))
         elif kind == 'C2':
             cur = struct.unpack('>I', dol.read(addr, 4))[0]
-            cc_ops.append(Hook(addr, cur, val + [0], tramp, 'Classic Controller hook'))
-            tramp += (len(val) + 1) * 4
+            cc_ops.append(Hook(addr, cur, _c2_payload(val), tramp, 'Classic Controller hook'))
+            tramp += len(val) * 4
             if tramp % 8 != 0:
                 tramp += 4
     feat_cc = Feature('cc', 'Classic Controller Support', region_id, cc_ops)
@@ -72,8 +79,8 @@ def build_cars1_for_region(region_id, tab_name):
     fov_ops = []
     for kind, addr, val in fov_parsed:
         cur = struct.unpack('>I', dol.read(addr, 4))[0]
-        fov_ops.append(Hook(addr, cur, val + [0], tramp, 'Widescreen FOV hook'))
-        tramp += (len(val) + 1) * 4
+        fov_ops.append(Hook(addr, cur, _c2_payload(val), tramp, 'Widescreen FOV hook'))
+        tramp += len(val) * 4
         if tramp % 8 != 0:
             tramp += 4
     feat_fov = Feature('fov', 'Fix Widescreen FOV', region_id, fov_ops)
@@ -260,8 +267,8 @@ def build_cars2_for_region(region_id, tab_name):
             cc_ops.append(Patch(addr, val, cur, 'Classic Controller 06 patch'))
         elif kind == 'C2':
             cur = struct.unpack('>I', dol.read(addr, 4))[0]
-            cc_ops.append(Hook(addr, cur, val + [0], tramp, 'Classic Controller hook'))
-            tramp += (len(val) + 1) * 4
+            cc_ops.append(Hook(addr, cur, _c2_payload(val), tramp, 'Classic Controller hook'))
+            tramp += len(val) * 4
             if tramp % 8 != 0:
                 tramp += 4
     feat_cc = Feature('cc', 'Classic Controller Support', region_id, cc_ops)
@@ -433,8 +440,8 @@ def build_cars3_for_region(region_id, tab_name):
             cc_ops.append(Patch(addr, val, cur, 'Classic Controller 06 patch'))
         elif kind == 'C2':
             cur = struct.unpack('>I', dol.read(addr, 4))[0]
-            cc_ops.append(Hook(addr, cur, val + [0], tramp, 'Classic Controller hook'))
-            tramp += (len(val) + 1) * 4
+            cc_ops.append(Hook(addr, cur, _c2_payload(val), tramp, 'Classic Controller hook'))
+            tramp += len(val) * 4
             if tramp % 8 != 0:
                 tramp += 4
     feat_cc = Feature('cc', 'Classic Controller Support', region_id, cc_ops)
