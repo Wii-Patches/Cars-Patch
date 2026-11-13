@@ -95,7 +95,7 @@ jobs:
             $BINS --distpath pyinst_dist tools/gui.py
           cp wit-gpl-2.0.txt "pyinst_dist/Cars-Trilogy-Patcher.app/Contents/Resources/wit-gpl-2.0.txt" || true
           cd pyinst_dist
-          zip -qr "../Cars-Trilogy-Patcher-${{ matrix.target }}.zip" Cars-Trilogy-Patcher.app
+          zip -qr "../Cars-Trilogy-ISO-Patcher-${{ matrix.target }}.zip" Cars-Trilogy-Patcher.app
 
       - name: Build app (Linux)
         if: matrix.target == 'linux-x86_64'
@@ -109,7 +109,7 @@ jobs:
             $BINS --distpath pyinst_dist tools/gui.py
           cp wit-gpl-2.0.txt pyinst_dist/Cars-Trilogy-Patcher/ || true
           cd pyinst_dist
-          tar -czf "../Cars-Trilogy-Patcher-${{ matrix.target }}.tar.gz" Cars-Trilogy-Patcher
+          tar -czf "../Cars-Trilogy-ISO-Patcher-${{ matrix.target }}.tar.gz" Cars-Trilogy-Patcher
 
       - name: Build app (Windows)
         if: matrix.target == 'windows-x86_64'
@@ -124,19 +124,19 @@ jobs:
             $BINS --distpath pyinst_dist tools/gui.py
           cp wit-gpl-2.0.txt pyinst_dist/Cars-Trilogy-Patcher/ || true
           cd pyinst_dist
-          7z a "../Cars-Trilogy-Patcher-${{ matrix.target }}.zip" Cars-Trilogy-Patcher \
-            || powershell -Command "Compress-Archive -Path Cars-Trilogy-Patcher -DestinationPath ../Cars-Trilogy-Patcher-${{ matrix.target }}.zip"
+          7z a "../Cars-Trilogy-ISO-Patcher-${{ matrix.target }}.zip" Cars-Trilogy-Patcher \
+            || powershell -Command "Compress-Archive -Path Cars-Trilogy-Patcher -DestinationPath ../Cars-Trilogy-ISO-Patcher-${{ matrix.target }}.zip"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Cars-Trilogy-Patcher-${{ matrix.target }}
-          path: Cars-Trilogy-Patcher-${{ matrix.target }}.*
+          name: Cars-Trilogy-ISO-Patcher-${{ matrix.target }}
+          path: Cars-Trilogy-ISO-Patcher-${{ matrix.target }}.*
 
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: Cars-Trilogy-Patcher-${{ matrix.target }}.*
+          files: Cars-Trilogy-ISO-Patcher-${{ matrix.target }}.*
 
   patch-files:
     needs: test
