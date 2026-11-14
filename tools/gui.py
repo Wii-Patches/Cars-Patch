@@ -1,247 +1,150 @@
 #!/usr/bin/env python3
-"""Desktop patcher GUI for the Disney-Pixar Cars Wii Trilogy.
+"""Drag-and-drop patcher: drop a Cars disc image on the window, done.
 
-Supports drag-and-drop or file browsing for WBFS / ISO disc images or main.dol files.
-Provides options for Classic Controller, GameCube Controller, Pitstop Skip, and FOV fixes.
+Extracts the disc, patches its own main.dol for the options you tick, and
+rebuilds the image in the same format.  The rebuilt image replaces the original
+in place (USB loaders key off the `/wbfs/<Title> [ID6]/` layout) and the
+untouched original is kept alongside as `<name>.bak`.
 """
 import os
 import queue
 import sys
 import threading
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-if HERE not in sys.path:
-    sys.path.insert(0, HERE)
-
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import disc
 import features
-import patcher
-from dol import Dol
-from regions import ALL_REGIONS, GAMES, game_for_region
 
 try:
     from tkinterdnd2 import DND_FILES, TkinterDnD
-    BASE = TkinterDnD.Tk
     HAVE_DND = True
-except ImportError:
-    BASE = tk.Tk
+except ImportError:                                    # fall back to click-to-browse
     HAVE_DND = False
 
 
-def asset_path(filename):
+def asset(name):
     if getattr(sys, 'frozen', False):
-        base = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
-        p = os.path.join(base, 'assets', filename)
-        if os.path.exists(p):
-            return p
-        p = os.path.join(base, filename)
-        if os.path.exists(p):
-            return p
-    return os.path.join(HERE, '..', 'assets', filename)
+        return os.path.join(getattr(sys, '_MEIPASS', os.path.dirname(sys.executable)), 'assets', name)
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'assets', name)
 
 
-class CarsPatcherApp(BASE):
+BASE = TkinterDnD.Tk if HAVE_DND else tk.Tk
+
+
+class App(BASE):
     def __init__(self):
         super().__init__()
-        self.title("Cars Trilogy Wii Patcher")
-        self.geometry("580x680")
-        self.minsize(540, 620)
-        self._set_window_icon()
-
-        # State
-        self.file_path = None
-        self.is_disc = False
-        self.region_id = None
-        self.feature_vars = {}
+        self.title('Cars-Patcher')
+        self.geometry('620x560')
+        self.msgq = queue.Queue()
         self.busy = False
 
-        self._build_ui()
-
-    def _set_window_icon(self):
-        path = asset_path('logo.png')
-        if not os.path.exists(path):
-            return
         try:
-            img = tk.PhotoImage(file=path)
-            # Window icons are small; downscale the banner so it isn't cropped/blurry
-            factor = max(1, img.width() // 128)
-            self.icon_img = img.subsample(factor, factor)
-            self.iconphoto(True, self.icon_img)
-        except Exception:
+            img = tk.PhotoImage(file=asset('logo.png'))
+            self.logo = img.subsample(max(1, img.width() // 300))
+            tk.Label(self, image=self.logo).pack(pady=(10, 0))
+        except Exception:                              # the window is fine without its logo
             pass
+        tk.Label(self, text='Cars  -  Mater-National  -  Race-O-Rama',
+                 font=('Helvetica', 12, 'bold')).pack(pady=(4, 6))
 
-    def _build_ui(self):
-        # 1. Header / Logo Banner (Aspect-Ratio Preserving)
-        banner_path = asset_path('logo.png')
-        if os.path.exists(banner_path):
-            try:
-                raw_img = tk.PhotoImage(file=banner_path)
-                # Keep original aspect ratio (539x348): subsample uniformly by 2 -> 270x174
-                sub_factor = max(1, raw_img.width() // 270)
-                self.logo_img = raw_img.subsample(sub_factor, sub_factor)
-                logo_lbl = tk.Label(self, image=self.logo_img)
-                logo_lbl.pack(pady=(12, 4))
-            except Exception:
-                pass
+        opts = tk.LabelFrame(self, text='Patches')
+        opts.pack(fill='x', padx=10)
+        self.cc = tk.BooleanVar(value=True)
+        self.cc_cb = tk.Checkbutton(opts, text='Classic Controller', variable=self.cc)
+        self.cc_cb.pack(anchor='w')
+        self.gc = tk.BooleanVar(value=True)
+        tk.Checkbutton(opts, text='GameCube controller (ports 1-4; a Wii Remote must stay connected)',
+                       variable=self.gc, command=self.sync_cc).pack(anchor='w')
+        self.sync_cc()
+        self.pitstop = tk.BooleanVar(value=True)
+        tk.Checkbutton(opts, text='Skip pitstop motions (Cars only)', variable=self.pitstop).pack(anchor='w')
+        self.fov = tk.BooleanVar(value=True)
+        tk.Checkbutton(opts, text='Widescreen fix, hor+ (Cars only)', variable=self.fov).pack(anchor='w')
 
-        title_lbl = tk.Label(self, text="Disney-Pixar Cars Trilogy · Wii",
-                             font=("TkDefaultFont", 12, "bold"))
-        title_lbl.pack(pady=(0, 2))
-        sub_lbl = tk.Label(self, text="Classic Controller & GameCube Controller Suite (Cars 1, 2, 3)",
-                           font=("TkDefaultFont", 10), fg="#555")
-        sub_lbl.pack(pady=(0, 8))
-
-        # 2. Options Frame
-        opts_frame = tk.LabelFrame(self, text=" Add Support For ", padx=12, pady=8)
-        opts_frame.pack(fill=tk.X, padx=14, pady=4)
-
-        for fkey in features.FEATURES:
-            var = tk.BooleanVar(value=True)
-            self.feature_vars[fkey] = var
-            cb = tk.Checkbutton(opts_frame, text=features.TITLES[fkey], variable=var,
-                                font=("TkDefaultFont", 10, "bold"), anchor=tk.W)
-            cb.pack(fill=tk.X, anchor=tk.W, pady=(2, 0))
-            desc_lbl = tk.Label(opts_frame, text=f"    {features.DESCRIPTIONS[fkey]}",
-                                font=("TkDefaultFont", 9), fg="#666", anchor=tk.W)
-            desc_lbl.pack(fill=tk.X, anchor=tk.W, pady=(0, 4))
-
-        # 3. Drop / Pick Target Area
-        hint = ("Drop a .wbfs, .iso, or main.dol here\n\n(or click to browse)"
-                if HAVE_DND else "Click to choose a .wbfs, .iso, or main.dol")
-        self.drop_lbl = tk.Label(self, text=hint, relief="ridge", bd=2,
-                                 padx=10, pady=22, cursor="hand2", font=("TkDefaultFont", 10))
-        self.drop_lbl.pack(fill=tk.X, padx=14, pady=10)
-        self.drop_lbl.bind("<Button-1>", lambda e: self._browse_file())
-
+        hint = ('Drop a .wbfs or .iso here\n\n(or click to choose one)'
+                if HAVE_DND else 'Click to choose a .wbfs or .iso')
+        self.drop = tk.Label(self, text=hint, relief='ridge', bd=2, padx=10, pady=24, cursor='hand2')
+        self.drop.pack(fill='x', padx=10, pady=10)
+        self.drop.bind('<Button-1>', lambda e: self.pick())
         if HAVE_DND:
-            self.drop_lbl.drop_target_register(DND_FILES)
-            self.drop_lbl.dnd_bind("<<Drop>>", self._on_drop)
+            self.drop.drop_target_register(DND_FILES)
+            self.drop.dnd_bind('<<Drop>>', self.on_drop)
 
-        # Info Note
-        note_lbl = tk.Label(self, text="The original image is kept alongside as <name>.bak",
-                            font=("TkDefaultFont", 9), fg="#666")
-        note_lbl.pack()
+        tk.Label(self, text='The original is kept alongside as <name>.bak', fg='#666').pack()
 
-        # 4. Action Button
-        btn_frame = tk.Frame(self)
-        btn_frame.pack(fill=tk.X, padx=14, pady=(6, 8))
+        self.log = tk.Text(self, height=10, state='disabled', wrap='word')
+        self.log.pack(fill='both', expand=True, padx=10, pady=10)
+        self.after(100, self.poll_queue)
 
-        self.patch_btn = tk.Button(btn_frame, text="Apply Patches", command=self._start_patching,
-                                   font=("TkDefaultFont", 11, "bold"), state=tk.DISABLED, pady=5)
-        self.patch_btn.pack(fill=tk.X)
+    def sync_cc(self):
+        # the GameCube pad rides on the Classic Controller code, so it comes along
+        if self.gc.get():
+            self.cc.set(True)
+        self.cc_cb.configure(state='disabled' if self.gc.get() else 'normal')
 
-        # 5. Output Log
-        log_frame = tk.LabelFrame(self, text=" Output Log ", padx=8, pady=6)
-        log_frame.pack(fill=tk.BOTH, expand=True, padx=14, pady=(0, 12))
+    def on_drop(self, event):
+        paths = self.tk.splitlist(event.data)          # handles {braced paths with spaces}
+        if paths:
+            self.start(paths[0])
 
-        self.log_text = tk.Text(log_frame, wrap=tk.WORD, font=("Consolas", 9), height=7, bg="#F9F9F9")
-        self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        scrollbar = tk.Scrollbar(log_frame, command=self.log_text.yview)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.log_text.config(yscrollcommand=scrollbar.set)
-
-    def log(self, text):
-        self.log_text.insert(tk.END, text + "\n")
-        self.log_text.see(tk.END)
-
-    def _on_drop(self, event):
-        paths = self.tk.splitlist(event.data)
-        if paths and not self.busy:
-            self._load_file(paths[0])
-
-    def _browse_file(self):
+    def pick(self):
         if self.busy:
             return
-        f = filedialog.askopenfilename(
-            title="Select Cars Disc Image or main.dol",
-            filetypes=[
-                ("All Supported Files", "*.wbfs;*.iso;*.dol"),
-                ("Wii Disc Images", "*.wbfs;*.iso"),
-                ("Executable DOL", "*.dol"),
-                ("All Files", "*.*")
-            ]
-        )
-        if f:
-            self._load_file(f)
+        p = filedialog.askopenfilename(title='Select disc image',
+                                       filetypes=[('Wii disc image', '*.wbfs *.iso'), ('All files', '*')])
+        if p:
+            self.start(p)
 
-    def _load_file(self, path):
-        self.file_path = path
-        ext = os.path.splitext(path)[1].lower()
+    def append_log(self, text):
+        self.log.configure(state='normal')
+        self.log.insert('end', text + '\n')
+        self.log.see('end')
+        self.log.configure(state='disabled')
 
-        if ext in ('.wbfs', '.iso'):
-            self.is_disc = True
-            wit_bin = disc.find_wit()
-            if not wit_bin:
-                self.log("Note: wit (Wiimms ISO Tool) is required to extract and rebuild disc images.")
-            self.drop_lbl.config(text=f"Selected Disc:\n{os.path.basename(path)}", fg="#006600")
-            self.patch_btn.config(state=tk.NORMAL)
-        elif ext == '.dol':
-            self.is_disc = False
-            try:
-                d = Dol(path)
-                reg = patcher.detect_region(d)
-                if reg:
-                    self.region_id = reg
-                    meta = ALL_REGIONS[reg]
-                    self.drop_lbl.config(text=f"Detected DOL:\n{reg} - {meta['label']}", fg="#006600")
-                    self.patch_btn.config(state=tk.NORMAL)
-                else:
-                    self.drop_lbl.config(text=f"Could not identify Cars region:\n{os.path.basename(path)}", fg="#990000")
-                    self.patch_btn.config(state=tk.DISABLED)
-            except Exception as e:
-                self.drop_lbl.config(text=f"Error reading DOL:\n{e}", fg="#990000")
-                self.patch_btn.config(state=tk.DISABLED)
-        else:
-            self.drop_lbl.config(text=f"Unsupported file type:\n{os.path.basename(path)}", fg="#990000")
-            self.patch_btn.config(state=tk.DISABLED)
+    def poll_queue(self):
+        try:
+            while True:
+                kind, payload = self.msgq.get_nowait()
+                if kind == 'log':
+                    self.append_log(payload)
+                elif kind == 'done':
+                    ok, msg = payload
+                    self.busy = False
+                    self.drop.configure(state='normal')
+                    if ok:
+                        messagebox.showinfo('Done', 'Patched in place:\n%s' % msg)
+                    else:
+                        messagebox.showerror('Patch failed', msg)
+        except queue.Empty:
+            pass
+        self.after(100, self.poll_queue)
 
-    def _start_patching(self):
-        if not self.file_path or self.busy:
+    def start(self, image_path):
+        if self.busy:
             return
-
-        selected = [k for k, v in self.feature_vars.items() if v.get()]
-        if not selected:
-            messagebox.showwarning("No Patches Selected", "Please select at least one patch option.")
+        if not os.path.isfile(image_path):
+            messagebox.showerror('Not a file', '%s is not a file.' % image_path)
             return
-
+        which = [n for n, v in (('cc', self.cc), ('gc', self.gc), ('pitstop', self.pitstop), ('fov', self.fov))
+                 if v.get()]
+        if not which:
+            messagebox.showerror('Nothing selected', 'Tick at least one patch.')
+            return
         self.busy = True
-        self.patch_btn.config(state=tk.DISABLED)
-        self.log_text.delete(1.0, tk.END)
-        self.log("Starting patch process...")
-
-        def worker():
-            try:
-                if self.is_disc:
-                    disc.run_patch(self.file_path, self.log, self._patch_finished, which=selected)
-                else:
-                    d = Dol(self.file_path)
-                    applied = patcher.patch(d, self.region_id, selected)
-                    out_path = self.file_path.replace('.dol', '_patched.dol')
-                    d.save(out_path)
-                    self.log(f"Successfully applied: {', '.join(applied)}")
-                    self.log(f"Saved patched DOL to: {out_path}")
-                    self._patch_finished(True, out_path)
-            except Exception as e:
-                self.log(f"ERROR: {e}")
-                self._patch_finished(False, str(e))
-
-        t = threading.Thread(target=worker, daemon=True)
-        t.start()
-
-    def _patch_finished(self, success, result):
-        def cb():
-            self.busy = False
-            self.patch_btn.config(state=tk.NORMAL)
-            if success:
-                messagebox.showinfo("Success", f"Patching completed successfully!\n\nTarget: {result}")
-            else:
-                messagebox.showerror("Patching Failed", f"An error occurred during patching:\n\n{result}")
-        self.after(0, cb)
+        self.drop.configure(state='disabled')
+        self.log.configure(state='normal')
+        self.log.delete('1.0', 'end')
+        self.log.configure(state='disabled')
+        threading.Thread(
+            target=disc.run_patch,
+            args=(image_path, lambda t: self.msgq.put(('log', t)),
+                  lambda ok, m: self.msgq.put(('done', (ok, m))), which),
+            daemon=True,
+        ).start()
 
 
 if __name__ == '__main__':
-    app = CarsPatcherApp()
-    app.mainloop()
+    App().mainloop()

@@ -9,7 +9,7 @@ A complete patch suite and modern native controller enhancement for the **Disney
 2. **Disney-Pixar Cars: Mater-National Championship** (2007)
 3. **Disney-Pixar Cars Race-O-Rama** (2009)
 
-Providing full analog **Classic Controller** support, native standalone **GameCube Controller** support (no Wii Remote needed), automated Piston Cup pitstop QTE handling, and true widescreen 16:9 FOV correction (hor+).
+Full analog **Classic Controller** support, **GameCube controller** support, a Piston Cup pitstop skip and a hor+ widescreen fix.
 
 ---
 
@@ -20,10 +20,10 @@ Providing full analog **Classic Controller** support, native standalone **GameCu
   - Reinstated native **Camera Toggle** button (Classic Y / GameCube Y) across all three views (Default, Chase, and First-Person bumper cam).
   - Power slide on R trigger, tilt vehicle on L trigger, and boost / nitro on ZR.
   - Motion shake actions (such as Jump) mapped cleanly to **ZL** / **C-Stick**.
-- **GameCube Controller (Standalone)**:
-  - Plug and play directly into GameCube ports 1–4.
-  - Functions completely standalone without requiring any synced Wii Remote.
-  - Real hardware support on original Wii consoles as well as Dolphin Emulator.
+- **GameCube Controller**:
+  - Pads in GameCube ports 1–4 drive Wii Remote channels 1–4.
+  - **A Wii Remote must still be connected on that channel** (no extension): the games only read a player whose remote is there. The pad stands in for a Classic Controller on it.
+  - The patch keeps the ports probed and polled itself (none of the three games links the SDK's `PAD` library), so a pad also works on a real Wii and can be re-plugged.
 - **Cars 1: Skip Pitstop Motions**:
   - Automatically satisfies the motion-controlled pitstop tune-up QTE minigames in Piston Cup races, allowing 100% completion with traditional controllers.
 - **Cars 1: Fix Widescreen FOV (hor+)**:
@@ -42,16 +42,16 @@ Providing full analog **Classic Controller** support, native standalone **GameCu
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: |
 | **Cars** (2006) | `RCAE78` | USA | Yes | Yes | Yes | Yes |
 | **Cars** (2006) | `RCAP78` | Europe (UK, Australia) | Yes | Yes | Yes | Yes |
-| **Cars** (2006) | `RCAX78` | Europe (De, It) | Yes | Yes | Yes | Yes |
-| **Cars** (2006) | `RCAY78` | Europe (Fr, Nl) | Yes | Yes | Yes | Yes |
+| **Cars** (2006) | `RCAX78` | Europe (Fr, Nl) | Yes | Yes | Yes | Yes |
+| **Cars** (2006) | `RCAY78` | Europe (De, It) | Yes | Yes | Yes | Yes |
 | **Cars** (2006) | `RCAJ78` | Japan | Yes | Yes | Yes | Yes |
 | **Mater-National** (2007) | `RC2E78` | USA | Yes | Yes | N/A | N/A |
 | **Mater-National** (2007) | `RC2P78` | Europe (UK, Australia) | Yes | Yes | N/A | N/A |
-| **Mater-National** (2007) | `RC2X78` | Europe (De, It) | Yes | Yes | N/A | N/A |
-| **Mater-National** (2007) | `RC2Y78` | Europe (Fr, Nl) | Yes | Yes | N/A | N/A |
+| **Mater-National** (2007) | `RC2X78` | Europe (Fr, Nl) | Yes | Yes | N/A | N/A |
+| **Mater-National** (2007) | `RC2Y78` | Europe (De, It) | Yes | Yes | N/A | N/A |
 | **Race-O-Rama** (2009) | `R6OE78` | USA | Yes | Yes | N/A | N/A |
 | **Race-O-Rama** (2009) | `R6OP78` | Europe (UK, Australia) | Yes | Yes | N/A | N/A |
-| **Race-O-Rama** (2009) | `R6OX78` | Europe (Fr, De, It, Es) | Yes | Yes | N/A | N/A |
+| **Race-O-Rama** (2009) | `R6OX78` | Europe (Fr, De) | Yes | Yes | N/A | N/A |
 
 ---
 
@@ -93,15 +93,20 @@ Launch the GUI patcher:
 ```bash
 python3 tools/gui.py
 ```
-1. Select your Cars disc image (`.wbfs` / `.iso`) or extracted `main.dol`.
+1. Select your Cars disc image (`.wbfs` / `.iso`).
 2. Choose your preferred patch options.
-3. Click **Apply Patches**. The tool automatically creates a `.bak` backup of your original disc image before patching in place.
+3. Drop the image on the window (or click to pick it). The original is kept next to it as `<name>.bak`.
 
 ### 2. Command Line Patcher
 Patch a raw `main.dol` directly:
 ```bash
 python3 tools/patcher.py input/main.dol output/main.dol --cc --gc --pitstop --fov
 ```
+or a whole disc image:
+```bash
+python3 tools/patch_disc.py "Disney-Pixar Cars (USA).wbfs" --cc --gc --pitstop --fov
+```
+`--pitstop` and `--fov` exist for Cars (2006) only and are skipped for the other two games.
 
 ### 3. Dolphin Emulator
 Copy the corresponding `.ini` file from `codes/<DISC_ID>.ini` into your Dolphin `User/GameSettings/` directory.
@@ -113,14 +118,14 @@ Copy the `riivolution/` directory to the root of your SD card or USB drive.
 
 ## Technical Details
 
-For an in-depth breakdown of assembly trampolines, KPADRead sample synthesis, memory cave layouts, and widescreen FOV calculations, see [docs/TECHNICAL.md](docs/TECHNICAL.md).
+Hook sites, the SI poller and the memory layout are described in [docs/TECHNICAL.md](docs/TECHNICAL.md).
 
 ---
 
 ## Credits
 
 - **Vague Rant**: Original Classic Controller Gecko codes, pitstop skips, and widescreen FOV patches.
-- **quatric**: Patch suite architecture, GameCube controller hardware injection, DOL static injector, Riivolution definitions, and desktop UI patcher.
+- **quatric**: GameCube controller support, the patcher, Gecko and Riivolution packaging.
 
 ### Modded images
 

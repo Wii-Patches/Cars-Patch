@@ -1,4 +1,4 @@
-"""Patch a whole Cars trilogy disc image: extract with wit, patch sys/main.dol, rebuild.
+"""Patch a whole disc image: extract with wit, patch sys/main.dol, rebuild.
 
 The rebuilt image replaces the original in place, keeping its filename and
 folder (USB loaders key off the `/wbfs/<Title> [ID6]/` layout); the untouched
@@ -10,19 +10,21 @@ import subprocess
 import sys
 import tempfile
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-if HERE not in sys.path:
-    sys.path.insert(0, HERE)
-
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import features
 import patcher
 from dol import Dol
 from disc_ids import match_disc_id
-from regions import ALL_REGIONS, GAMES
+from regions import REGIONS
 
 
 def find_wit():
-    """Locate wiimms ISO Tool (wit). Bundled binary wins over PATH."""
+    """A wit bundled with this app (PyInstaller build) wins over PATH.
+
+    --add-binary'd files land next to sys._MEIPASS: a plain onedir build puts
+    them in _internal/, and a windowed macOS .app puts them in
+    Contents/Frameworks/ instead of Contents/MacOS/ alongside the binary.
+    """
     name = 'wit.exe' if os.name == 'nt' else 'wit'
     if getattr(sys, 'frozen', False):
         for base in (getattr(sys, '_MEIPASS', None), os.path.dirname(sys.executable)):
@@ -49,13 +51,17 @@ def read_disc_id(fst):
     return header[0:6].decode('ascii', 'replace'), header[7]
 
 
-def run_patch(image_path, log, done, which=('cc', 'gc', 'pitstop', 'fov'), ios=None, dest=None):
-    """Patch `image_path` in place or to `dest`."""
+def run_patch(image_path, log, done, which=('cc', 'gc', 'pitstop', 'fov'), dest=None):
+    """Patch `image_path` in place (or write the patched copy to `dest`, leaving the
+    original alone).  `which` names the features."""
     try:
         wit = find_wit()
         if wit is None:
-            raise RuntimeError('wit (Wiimms ISO Tool) not found: not bundled with this build and not on PATH')
-
+            raise RuntimeError('wit (Wiimms ISO Tool) not found: not bundled with this '
+                               'build and not on PATH')
+        which = features.closure(which)
+        if not which:
+            raise RuntimeError('nothing selected: tick at least one patch')
         fmt = '--iso' if (dest or image_path).lower().endswith('.iso') else '--wbfs'
 
         with tempfile.TemporaryDirectory(prefix='cars_patch_') as tmp:
@@ -70,14 +76,12 @@ def run_patch(image_path, log, done, which=('cc', 'gc', 'pitstop', 'fov'), ios=N
             if not got:
                 raise RuntimeError('could not read sys/boot.bin from the extracted disc')
             disc_id, disc_ver = got
-            region = match_disc_id(disc_id, ALL_REGIONS)
-            if region is None:
-                raise RuntimeError('%s is not a recognized Cars trilogy release.\n\n'
-                                   'Supported:\n%s' % (disc_id, '\n'.join(
-                                       '  %s: %s' % (k, v['label']) for k, v in ALL_REGIONS.items())))
-
-            reg_info = ALL_REGIONS[region]
-            log('disc: %s (%s)' % (region, reg_info['label']))
+            region = match_disc_id(disc_id, REGIONS)
+            if region is None or REGIONS[region]['version'] != disc_ver:
+                raise RuntimeError('%s v%d is not a Cars release this patcher knows.\n\n'
+                                   'Supported:\n%s' % (disc_id, disc_ver, '\n'.join(
+                                       '  %s: %s' % (k, v['label']) for k, v in REGIONS.items())))
+            log('disc: %s (%s)' % (region, REGIONS[region]['label']))
 
             dol_path = find_file(fst, 'main.dol')
             if not dol_path or os.path.basename(os.path.dirname(dol_path)) != 'sys':
@@ -85,40 +89,34 @@ def run_patch(image_path, log, done, which=('cc', 'gc', 'pitstop', 'fov'), ios=N
             dol = Dol(dol_path)
 
             have = patcher.status(dol, region)
-            valid_feats = reg_info.get('features', patcher.ORDER)
-            selected = [w for w in valid_feats if w in which]
-            if not selected:
-                raise RuntimeError('no applicable patches selected for this title')
-
             todo = []
-            for name in selected:
+            skipped = [n for n in which if not features.applies(n, region)]
+            if skipped:
+                log('not for this game, skipping: %s' % ', '.join(features.TITLES[n] for n in skipped))
+            for name in which:
+                if name in skipped:
+                    continue
                 st = have.get(name)
                 if st == 'patched':
-                    log('  %s is already applied in this disc' % features.TITLES[name])
+                    log('%s is already in this disc, skipping' % features.TITLES[name])
                 elif st == 'clean':
                     todo.append(name)
                 else:
-                    raise RuntimeError('main.dol does not match clean retail %s (%s): already modified '
-                                       'or bad dump. Refusing to patch.'
-                                       % (reg_info['label'], features.TITLES[name]))
-
-            want_ios = ios is not None and ios != _disc_ios(wit, image_path)
-            if not todo and not want_ios:
-                raise RuntimeError('nothing left to add: selected patches are already in this disc.')
+                    raise RuntimeError('the main.dol does not match the retail %s (%s) -- already modified '
+                                       'by something else, or not an unmodified dump. Not patching it.'
+                                       % (REGIONS[region]['label'], features.TITLES[name]))
+            if not todo:
+                raise RuntimeError('nothing left to add: the selected patches are already in this disc.')
 
             if todo:
-                applied = patcher.patch(dol, region, todo)
-                for t in applied:
+                for t in patcher.patch(dol, region, todo):
                     log('  added %s' % t)
                 dol.save(dol_path)
-                log('  saved patched main.dol')
+                log('  patched main.dol')
 
             staged = os.path.join(tmp, 'patched.img')
-            log('rebuilding disc image...')
+            log('rebuilding...')
             cmd = [wit, 'copy', fst, '--dest', staged, fmt, '--overwrite', '-q']
-            if ios is not None:
-                cmd += ['--ios', str(ios)]
-                log('  setting disc IOS to %d' % ios)
             r = subprocess.run(cmd, capture_output=True, text=True)
             if r.returncode:
                 raise RuntimeError('rebuild failed:\n' + (r.stderr or r.stdout))
@@ -129,6 +127,7 @@ def run_patch(image_path, log, done, which=('cc', 'gc', 'pitstop', 'fov'), ios=N
                 done(True, dest)
                 return
 
+            # Only touch the user's file once the rebuild has actually succeeded.
             backup = image_path + '.bak'
             if os.path.exists(backup):
                 log('  backup already exists, keeping it: %s' % os.path.basename(backup))
@@ -141,15 +140,3 @@ def run_patch(image_path, log, done, which=('cc', 'gc', 'pitstop', 'fov'), ios=N
     except Exception as e:
         log('ERROR: %s' % e)
         done(False, str(e))
-
-
-def _disc_ios(wit, image_path):
-    try:
-        out = subprocess.run([wit, 'dump', image_path], capture_output=True, text=True).stdout
-        for line in out.splitlines():
-            if 'System version:' in line and 'IOS' in line:
-                return int(line.rsplit('IOS', 1)[1].split()[0], 0)
-    except Exception:
-        pass
-    return None
-

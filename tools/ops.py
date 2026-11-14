@@ -26,10 +26,10 @@ def b_insn(target, frm, link=False):
 
 @dataclass
 class Patch:
-    """Overwrite bytes in place; `orig` is what retail has there."""
+    """Overwrite bytes in place; `orig` is what retail has there (None: not known)."""
     addr: int
     new: bytes
-    orig: bytes
+    orig: bytes | None
     note: str = ''
 
 
@@ -39,10 +39,11 @@ class Hook:
 
     payload[:-1] is the trampoline body (it must itself execute the displaced
     instruction `orig`); payload[-1] is a placeholder that becomes the branch
-    back to site+4.  `tramp` is where the static build puts it.
+    back to site+4.  `tramp` is where the static build puts it.  `orig` is None
+    for a release whose DOL has not been checked.
     """
     site: int
-    orig: int
+    orig: int | None
     payload: list
     tramp: int
     note: str = ''
@@ -83,12 +84,17 @@ class Feature:
         bad = []
         for op in self.ops:
             if isinstance(op, Patch):
-                if dol.read(op.addr, len(op.orig)) != op.orig:
+                if op.orig is not None and dol.read(op.addr, len(op.orig)) != op.orig:
                     bad.append('0x%08X' % op.addr)
             elif isinstance(op, Hook):
-                if dol.read(op.site, 4) != struct.pack('>I', op.orig):
+                if op.orig is not None and dol.read(op.site, 4) != struct.pack('>I', op.orig):
                     bad.append('0x%08X' % op.site)
         return bad
+
+    @property
+    def verified(self):
+        """True when every site's retail bytes are known (checked against a real DOL)."""
+        return all(op.orig is not None for op in self.ops if isinstance(op, (Patch, Hook)))
 
     def is_applied(self, dol):
         """True when every site already carries this feature's bytes."""

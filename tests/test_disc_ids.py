@@ -9,22 +9,22 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 import disc
 from disc_ids import match_disc_id
-from regions import ALL_REGIONS
+from regions import REGIONS
 
 
 class DiscIdentityTests(unittest.TestCase):
     def test_supported_ids_and_mods(self):
-        for key in ALL_REGIONS:
+        for key in REGIONS:
             if len(key) != 6:
                 continue
-            self.assertEqual(match_disc_id(key, ALL_REGIONS), key)
-            self.assertEqual(match_disc_id(key[:4] + '99', ALL_REGIONS), key)
-        self.assertIsNone(match_disc_id('ZZZZ99', ALL_REGIONS))
-        self.assertIsNone(match_disc_id('R', ALL_REGIONS))
+            self.assertEqual(match_disc_id(key, REGIONS), key)
+            self.assertEqual(match_disc_id(key[:4] + '99', REGIONS), key)
+        self.assertIsNone(match_disc_id('ZZZZ99', REGIONS))
+        self.assertIsNone(match_disc_id('R', REGIONS))
 
     def exercise(self, identity, version, mismatch=False):
-        key = next(k for k in ALL_REGIONS if len(k) == 6)
-        info = ALL_REGIONS[key]
+        key = next(k for k in REGIONS if len(k) == 6)
+        info = REGIONS[key]
         feature = disc.patcher.ORDER[0]
         with tempfile.TemporaryDirectory() as tmp:
             image = Path(tmp) / 'mod.iso'
@@ -59,8 +59,8 @@ class DiscIdentityTests(unittest.TestCase):
             return success
 
     def test_modded_disc_flow(self):
-        key = next(k for k in ALL_REGIONS if len(k) == 6)
-        info = ALL_REGIONS[key]
+        key = next(k for k in REGIONS if len(k) == 6)
+        info = REGIONS[key]
         version = info.get('version', info.get('versions', [0])[0])
         self.assertTrue(self.exercise(key[:4] + '99', version))
         self.assertFalse(self.exercise('ZZZZ99', version))

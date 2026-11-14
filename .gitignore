@@ -1,20 +1,19 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-env/
-build/
-dist/
-*.egg-info/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Scratch and intermediate working directories
-work/
-scratch/
-prompt_dump.txt
+# Never commit game binaries or anything derived from them.
+*.dol
+*.app
+*.wbfs
+*.iso
+*.wad
+*.raw
 *.bak
+dumps/
+images/
+build/
+work/
+/tools/dist/
+dist/
+
+__pycache__/
+*.pyc
+.DS_Store
+prompt_dump.txt

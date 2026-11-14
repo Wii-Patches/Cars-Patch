@@ -18,6 +18,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Consistency checks
+        run: python3 tools/check.py
       - name: Unit tests
         run: python -m unittest discover -s tests -v
 
@@ -90,8 +92,8 @@ jobs:
           pyinstaller --name Cars-Trilogy-Patcher --windowed --noconfirm \
             --collect-all tkinterdnd2 \
             --target-architecture universal2 \
-            --paths tools --add-data codes:codes --add-data assets/logo.png:assets \
-            --add-data tools/prebuilt:tools/prebuilt \
+            --paths tools --add-data assets/logo.png:assets \
+            --add-data tools/prebuilt:prebuilt \
             $BINS --distpath pyinst_dist tools/gui.py
           cp wit-gpl-2.0.txt "pyinst_dist/Cars-Trilogy-Patcher.app/Contents/Resources/wit-gpl-2.0.txt" || true
           cd pyinst_dist
@@ -104,8 +106,8 @@ jobs:
           for f in wit_bin/*; do BINS="$BINS --add-binary $f:."; done
           pyinstaller --name Cars-Trilogy-Patcher --windowed --noconfirm \
             --collect-all tkinterdnd2 \
-            --paths tools --add-data codes:codes --add-data assets/logo.png:assets \
-            --add-data tools/prebuilt:tools/prebuilt \
+            --paths tools --add-data assets/logo.png:assets \
+            --add-data tools/prebuilt:prebuilt \
             $BINS --distpath pyinst_dist tools/gui.py
           cp wit-gpl-2.0.txt pyinst_dist/Cars-Trilogy-Patcher/ || true
           cd pyinst_dist
@@ -119,8 +121,8 @@ jobs:
           for f in wit_bin/*; do BINS="$BINS --add-binary $f;."; done
           pyinstaller --name Cars-Trilogy-Patcher --windowed --noconfirm \
             --collect-all tkinterdnd2 \
-            --paths tools --add-data "codes;codes" --add-data "assets/logo.png;assets" \
-            --add-data "tools/prebuilt;tools/prebuilt" \
+            --paths tools --add-data "assets/logo.png;assets" \
+            --add-data "tools/prebuilt;prebuilt" \
             $BINS --distpath pyinst_dist tools/gui.py
           cp wit-gpl-2.0.txt pyinst_dist/Cars-Trilogy-Patcher/ || true
           cd pyinst_dist

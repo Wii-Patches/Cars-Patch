@@ -1,35 +1,33 @@
-"""Apply selected patches to any Cars trilogy main.dol."""
+"""Apply the selected patches to one main.dol."""
 import os
 import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-if HERE not in sys.path:
-    sys.path.insert(0, HERE)
-
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import features
 from dol import Dol
 from ops import apply_static
-from regions import ALL_REGIONS, game_for_region
+from regions import REGIONS
 
-ORDER = ('cc', 'gc', 'pitstop', 'fov')
+ORDER = features.FEATURES
 
 
 def detect_region(dol):
-    """Detect which Cars release this main.dol is by checking pristine or patched state."""
-    for region in ALL_REGIONS:
-        # Check 'cc' feature first
-        if features.available('cc', region):
-            f = features.load('cc', region)
-            if not f.check_pristine(dol) or f.is_applied(dol):
-                return region
+    """Which release this main.dol is, from its own bytes (None if unknown).
+
+    Only releases whose retail bytes have been checked can be told apart; the
+    others need `--region` (or a disc image, which names its own release).
+    """
+    for region in REGIONS:
+        f = features.load('cc', region)
+        if f.verified and (not f.check_pristine(dol) or f.is_applied(dol)):
+            return region
     return None
 
 
 def status(dol, region):
-    """Return {feature_name: 'clean' | 'patched' | 'mismatch'} for all features valid on this game."""
+    """{feature: 'clean' | 'patched' | 'mismatch'} for each feature on this DOL."""
     out = {}
-    valid_features = ALL_REGIONS.get(region, {}).get('features', ORDER)
-    for name in valid_features:
+    for name in ORDER:
         if not features.available(name, region):
             continue
         f = features.load(name, region)
@@ -43,13 +41,13 @@ def status(dol, region):
 
 
 def patch(dol, region, which):
-    """Patch `dol` (a dol.Dol instance) in place with the features in `which`."""
-    valid_features = ALL_REGIONS.get(region, {}).get('features', ORDER)
-    feats = [features.load(n, region) for n in valid_features if n in which and features.available(n, region)]
-    if not feats:
-        raise ValueError('No valid patches selected for region %s' % region)
-    apply_static(dol, feats)
-    return [f.title for f in feats]
+    """Patch `dol` (a dol.Dol) in place with the features named in `which`
+    (plus the Classic Controller code the GameCube pad depends on)."""
+    names = [n for n in features.closure(which) if features.available(n, region)]
+    if not names:
+        raise ValueError('nothing selected')
+    apply_static(dol, [features.load(n, region) for n in names])
+    return [features.TITLES[n] for n in names]
 
 
 def patch_file(src, dst, region, which):
@@ -61,17 +59,16 @@ def patch_file(src, dst, region, which):
 
 if __name__ == '__main__':
     import argparse
-    ap = argparse.ArgumentParser(description='Patch a Cars trilogy main.dol')
-    ap.add_argument('src', help='Path to source main.dol')
-    ap.add_argument('dst', help='Path to output patched main.dol')
-    ap.add_argument('--region', choices=sorted(ALL_REGIONS), help='Region ID (auto-detected if omitted)')
+    ap = argparse.ArgumentParser(description='Patch a Cars / Cars: Mater-National / Cars Race-O-Rama main.dol')
+    ap.add_argument('src')
+    ap.add_argument('dst')
+    ap.add_argument('--region', choices=sorted(REGIONS), help='default: detect')
     for n in ORDER:
         ap.add_argument('--' + n, action='store_true', help=features.TITLES[n])
     a = ap.parse_args()
     d = Dol(a.src)
     reg = a.region or detect_region(d)
     if not reg:
-        sys.exit('Error: could not auto-detect Cars region; please specify --region')
-    which = [n for n in ORDER if getattr(a, n)] or list(ALL_REGIONS[reg]['features'])
-    applied = patch_file(a.src, a.dst, reg, which)
-    print(f"{reg} ({ALL_REGIONS[reg]['label']}) -> {', '.join(applied)}")
+        sys.exit('could not identify this main.dol; pass --region')
+    which = [n for n in ORDER if getattr(a, n)] or list(ORDER)
+    print(reg, REGIONS[reg]['label'], '->', ', '.join(patch_file(a.src, a.dst, reg, which)))

@@ -1,81 +1,121 @@
-# Cars Trilogy Wii Patch: Technical Architecture & Implementation
+# Cars Trilogy Wii Patch: technical notes
 
-This document describes the reverse engineering, hook placement, and controller synthesis implementation used in the Cars Wii Patch suite.
+How each patch is built, where it hooks, and what has been checked.
 
----
+## Releases
 
-## 1. Engine & Subsystem Architecture
-
-The three games in the Cars Wii trilogy share an engine foundation originated by Rainbow Studios and modified for Wii by Incinerator Studios:
-- **Cars (2006)**: Early RVL_SDK integration (Wii launch window). Uses `WPADProbe`, `KPADRead`, and custom `WIIJoystickDevice` classes.
-- **Cars: Mater-National Championship (2007)**: Expanded sandbox world, refined vehicle physics, and updated KPAD extensions.
-- **Cars Race-O-Rama (2009)**: Modernized rendering pipeline, new drift mechanic, and expanded memory layouts.
-
----
-
-## 2. Memory Layout & Trampoline Allocation
-
-When patching a DOL statically without requiring dynamic code loaders (like Gecko OS), routines must reside in executable memory that does not conflict with the game's BSS, heap, or stack.
-
-The Wii's low memory region `0x80001800 - 0x80003000` serves as a boot-time scratchpad that is entirely unused during standard game execution (the first 0x20 bytes are overwritten by OS boot). We partition this memory cave into deterministic windows:
-
-| Address Range | Size | Allocation |
+| Game | IDs | KPAD offset from USA |
 | :--- | :--- | :--- |
-| `0x80001820 - 0x80002200` | `0x9E0` bytes | Classic Controller & FOV hook trampolines (`CC_BASE`) |
-| `0x80002200 - 0x80002F00` | `0xD00` bytes | GameCube controller hook trampolines (`GC_BASE`) |
-| `0x80002F00 - 0x80002F40` | `0x40` bytes | Per-channel state & button transition history (`DATA_BASE`) |
+| Cars (2006) | `RCAE78` USA, `RCAP78` En/Es, `RCAX78` Fr/Nl, `RCAY78` De/It, `RCAJ78` Japan | 0, +0x70 (all PAL), +0x760 |
+| Mater-National (2007) | `RC2E78`, `RC2P78`, `RC2X78`, `RC2Y78` | 0, +0x130 (all PAL) |
+| Race-O-Rama (2009) | `R6OE78`, `R6OP78`, `R6OX78` | 0, +0x50 (all PAL) |
 
----
+All are disc version 0. The Redump names map to IDs as follows: "Europe (De,It)"
+is `xxxY78` and "Europe (Fr,Nl)" is `xxxX78`, read from the discs themselves.
+Earlier versions of this repo had those two swapped, labels and Classic
+Controller codes both.
 
-## 3. GameCube Controller Synthesis Pipeline
+`tools/verify.py` checks the patch data against the retail `main.dol` of all
+twelve releases (`CARS_DOLS=<dir with <ID>.dol>`).
 
-Rather than patching individual gameplay routines across hundreds of vehicle physics calls, the patch operates at the hardware polling boundary:
+## Memory layout
 
-```
-[Hardware: SI Inbuf] (0xCD006404)
-        │
-        ▼
-[WPADProbe Hook] ────► If Wiimote disconnected & GC Pad present:
-        │              Report ERR_NONE (0) and DevType = 2 (Classic Controller)
-        ▼
-[KPADRead Hook]  ────► Synthesize KPADStatus sample:
-                       - Map GC buttons to CC bitfield
-                       - Scale GC analog stick [-128..127] -> [-308..308]
-                       - Map C-Stick / D-Pad Up to ZL / Shake (Jump)
-                       - Compute trigger & release deltas
-                       - Populate resting accelerometers
-        │
-        ▼
-[Game Input Pipeline: WIIJoystickDevice]
-Processes synthetic Classic Controller sample seamlessly.
-```
+Hook bodies live in a section the patcher adds to `main.dol` at low memory, which
+the games never touch after boot (`tools/layout.py`):
 
-### 3.1 SI Controller Registers
-The Serial Interface (SI) coprocessor polls physical GameCube ports and mirrors results to hardware memory-mapped registers:
-- `SICnINBUFH` (`0xCD006404 + 12 * n`):
-  - Bit 31: Error flag (set if no controller connected).
-  - Bit 23: Pad identification bit (always 1 for standard pads).
-  - Bits [29:16]: Button bitfield (`A`, `B`, `X`, `Y`, `Start`, `Z`, `R`, `L`, `D-Pad`).
-  - Bits [15:8]: Main Stick X (0..255).
-- `SICnINBUFL` (`0xCD006408 + 12 * n`):
-  - Bits [31:24]: Main Stick Y (0..255).
-  - Bits [23:16]: C-Stick X (0..255).
-  - Bits [15:8]: C-Stick Y (0..255).
-  - Bits [7:0]: Analog triggers (L/R).
+| Range | Use |
+| :--- | :--- |
+| `0x80001820-0x80002000` | Classic Controller hooks |
+| `0x80002000-0x80002200` | Widescreen fix hooks (Cars) |
+| `0x80002200-0x80002FC0` | GameCube controller hooks |
+| `0x80002FC0-0x80002FD4` | SI poller state (probe time stamps, NOREP counters) |
 
----
+A loader's own Gecko code handler also lives in this area, so the Gecko codes
+should not be combined with a loader's cheat engine on a real Wii; the patched
+disc and Riivolution are fine.
 
-## 4. Skip Pitstop Motions & Widescreen FOV
+## Classic Controller, pitstop skip, widescreen fix
 
-### 4.1 Piston Cup Pitstop QTE Bypass
-In the original Wii port of Cars 1, pitstops during Piston Cup races invoke motion-based QTE minigames requiring rapid Wii Remote gestures. The bypass patch replaces the timer check instruction in `PitstopMinigame::Update` (`0x80062CAC`):
-```powerpc
-b 0x80062CC8    # Force branch directly to successful completion
-```
+These are Vague Rant's Gecko codes (`src/cc/<ID>.txt`, `src/fov/<ID>.txt`, and
+the one-line pitstop skip in `src/gen_pitstop.py`), turned into patch
+operations so the same data can become a patched DOL, a Gecko list or a
+Riivolution patch.
 
-### 4.2 Widescreen Field of View (hor+)
-Cars was originally rendered in 4:3 on sixth-gen consoles. In the Wii port, 16:9 widescreen was implemented by cropping the top and bottom of the 4:3 view (`vert-`).
+Fixes against the codes as posted:
 
-The widescreen hook intercepts the viewport aspect calculation:
-- Reads system aspect ratio flag (`0x800D99C8`).
-- When 16:9 is active, multiplies the projection matrix horizontal field of view by `1.3333333f` (`4:3 -> 16:9`), maintaining vertical height while expanding the peripheral viewing field (`hor+`).
+- The Japanese Cars code's first button hook was `C22F6498`, the European
+  address. On `RCAJ78` that is the middle of an unrelated store run; the
+  instruction it means (`lhz r0,0(r4)` in `read_kpad_button`) is at
+  `0x802F6B88`, the USA site plus Japan's `+0x760`.
+- The `RCAX78` / `RCAY78` codes were swapped (see Releases).
+
+The pitstop skip (`0x80062CAC`: `bne` → `b`) and both widescreen hook sites are
+the same instruction in every Cars release; the widescreen code's two function
+pointers are checked to be the same functions as USA's.
+
+## GameCube controller
+
+### Reading the pad
+
+The SI hardware mirrors each port's answer into `SICnINBUFH/L`
+(`0xCD006404/0xCD006408 + 12·n`): bit 31 error, bit 23 set in a pad's answer,
+bits 29–16 the PAD buttons, then the stick bytes.
+
+None of the three games links the SDK's `PAD` library. `SIInit` probes the four
+ports once at boot and nothing ever enables auto-polling. Dolphin refreshes the
+result registers anyway, a real Wii does not. So `src/gc_poll.s` hooks the
+entry of `KPADRead` (called once per channel per frame) and does what
+`PADRead` / `SIEnablePolling` would, following the console-tested Barrel Blast
+poller:
+
+- re-probes a port whose cached type (`Si+0x18+4n`) is not a confirmed
+  standard pad with `SIGetType`, at most every 0.25 s per port;
+- turns a NOREP that persists for ~10 frames into cached type 8, the only value
+  that makes `SIGetType` probe again, so a re-plugged pad is found;
+- writes the poll command `0x00400300` to every `SICnOUTBUF`, then `SISR` = WR |
+  the error nibbles to latch it;
+- sets the enable + copy-on-vblank bits in `SIPOLL` for confirmed pads only,
+  and the same byte in si's shadow copy (`Si+4`), which the VI retrace writes
+  back to `SIPOLL`.
+
+The si state block `Si` and `SIGetType` are read from each DOL
+(`gen_gc._si`): `SISetXY` is the only `stw rX,0x6430(rY)`, and `SIInit` calls
+`SIGetType` four times in a row.
+
+| | `Si` (USA) | `SIGetType` (USA) | `KPADRead` (USA) |
+| :--- | :--- | :--- | :--- |
+| Cars | `0x8049DFA0` | `0x8030A4EC` | `0x802F8568` |
+| Mater-National | `0x80508B08` | `0x80306244` | `0x802F3868` |
+| Race-O-Rama | `0x804E1CE0` | `0x80318120` | `0x803671D0` |
+
+Every hook only uses a port that si's type cache marks as a confirmed standard
+pad, whose answer has bit 31 clear and bit 23 set (`PADREAD` in
+`src/gc_macros.s`). An unplugged port stops being polled, so its registers keep
+the last answer; the type check keeps that from reading as a held pad.
+
+Checked in Dolphin (Cars USA, pad in port 1, no Wii Remote): after boot si's
+shadow holds `0x00F60288` (port 1 enabled with copy-on-vblank), port 1 is cached
+as `0x09000000` and the empty ports as 8.
+
+### Feeding the game
+
+Port N feeds KPAD channel N. The pad makes the channel look like a Wii Remote
+with a Classic Controller, so Vague Rant's Classic Controller code does the rest:
+
+- **Cars, Mater-National:** in the KPAD read loop, around the call that turns a
+  sample into acceleration data, the channel's extension type is set to 2 while
+  a pad answers and the remote has no extension of its own; the sticks are
+  written where a Classic Controller's go; the real type is put back before the
+  call returns (`*_acc.s`, `*_restore.s`). The buttons are ORed in at the
+  merge point of `read_kpad_button` (`*_buttons.s`).
+- **Race-O-Rama:** the same, at both read loops, plus the game's own
+  controller-type table: a bare remote with a pad is recorded as a Classic
+  Controller (`ror_type.s`).
+
+### Known limitation: a Wii Remote is still needed
+
+KPAD only produces samples for a channel whose remote is connected
+(`KPADRead` returns early for device type 253 / a negative channel state), and
+Cars stops at "Press the + Button" with only a pad. Playing without any remote
+would need WPAD-level faking (`WPADProbe`, the WPAD sample ring KPAD copies
+from) for three KPAD versions plus each game's own connection checks.
