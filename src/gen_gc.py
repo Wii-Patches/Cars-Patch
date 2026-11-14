@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.join(HERE, '..', 'tools'))
 import asm
 from layout import GC_BASE, GC_END
 from ops import Feature, Hook
+from sig import find_unique
 from regions import REGIONS
 
 DEAD = 10           # control stick dead zone (of 128)
@@ -28,6 +29,21 @@ STATE = 0x80002FC0  # gc_poll.s: probe time stamps and NOREP counters (end of th
 
 # USA entry of KPADRead (hooked by the SI poller, gc_poll.s)
 KPADREAD = {'cars': 0x802F8568, 'mater': 0x802F3868, 'ror': 0x803671D0}
+
+# Playing with no Wii Remote (gc_probe.s, gc_index.s, the tail of gc_poll.s): the
+# USA WPADProbe and "newest ring index" functions, and the WPAD / KPAD layout.
+# KBASE (channel 0's KPAD struct) and WPCB (the table of WPAD control blocks)
+# are read from the first lis/addi pair of KPADRead and WPADProbe.
+WPAD = {
+    'cars': dict(probe=0x803131C0, index=0x803138C4, dpd=0x80315360,
+                 c=dict(PROBETYPE=0, WPSTAT=0x7FC, KSTRIDE=0x400, KWAIT1=0x3F4, KWAIT2=0x3FC, KDPD=0x3EC,
+                        RINGOFF=0x118, RINGN=12, SSIZE=0x2A)),
+    # newer KPAD: samples go straight into KPAD's own ring (gc_ring.s at `ring`)
+    'mater': dict(probe=0x8030F2C4, ring=0x802F396C,
+                  c=dict(PROBETYPE=2, WPSTAT=0x8BC, CREG=27, KREG=31, RBASE=0x110, RIDX=0x10E, RCOUNT=0x10F)),
+    'ror': dict(probe=0x80325680, ring=0x8036734C,
+                c=dict(PROBETYPE=2, WPSTAT=0x8BC, CREG=25, KREG=26, RBASE=0x13C, RIDX=0x13A, RCOUNT=0x13B)),
+}
 
 # name -> (library symbols, [(source, [sites], note)])
 GAMES = {
@@ -100,6 +116,19 @@ def _bl_target(word, at):
     return (at + li) & 0xFFFFFFFF
 
 
+def _lis_addi(dol, func, n=24):
+    """The address built by the first `lis rX` / `addi rY,rX` pair in `func`."""
+    ws = [_word(dol, func + 4 * k) for k in range(n)]
+    for i, w in enumerate(ws):
+        if w >> 26 == 15 and (w >> 16) & 31 == 0:
+            rx = (w >> 21) & 31
+            for x in ws[i + 1:i + 8]:
+                if x >> 26 == 14 and (x >> 16) & 31 == rx:
+                    lo = x & 0xFFFF
+                    return (((w & 0xFFFF) << 16) + (lo - 0x10000 if lo & 0x8000 else lo)) & 0xFFFFFFFF
+    raise SystemExit('%s: no lis/addi pair in 0x%08X' % (dol.path, func))
+
+
 def build(region, dol=None, usa_dol=None):
     """`dol`: this release's main.dol (None: unchecked); `usa_dol`: the USA one of the game."""
     meta = REGIONS[region]
@@ -113,7 +142,23 @@ def build(region, dol=None, usa_dol=None):
         raise SystemExit('%s: need the release\'s own main.dol (the si addresses are read from it)' % region)
     syms['SIBASE'], syms['SIGETTYPE'] = _si(dol)
     syms['STATE'] = STATE
+    wpad = WPAD.get(meta['game'])
+    kpadread = KPADREAD[meta['game']] + shift
+    consts_poll = {}
+    if os.environ.get('CARS_DEBUG_FEED'):
+        consts_poll['DEBUG_FEED'] = int(os.environ['CARS_DEBUG_FEED'], 16)
+    fake = {}                       # hook name -> address in this release
+    if wpad:
+        for name in ('probe', 'index', 'dpd', 'ring'):
+            if name in wpad:
+                fake[name] = (wpad[name] if dol is usa_dol or usa_dol is None
+                              else find_unique(usa_dol, dol, wpad[name], 0 if name != 'ring' else 8, 16))
+        syms['WPCB'] = _lis_addi(dol, fake['probe'])
+        syms['KBASE'] = _lis_addi(dol, kpadread)
+        consts_poll.update(wpad['c'])
     consts = dict(DEAD=DEAD, KMUL=KMUL, CDEAD=CDEAD)
+    if os.environ.get('CARS_DEBUG_FEED'):       # test builds: see PADREAD in gc_macros.s
+        consts['DEBUG_FEED'] = int(os.environ['CARS_DEBUG_FEED'], 16)
     macros = _read('gc_macros.s')
     helpers = _read('gc_stick.s')
     ops, cur = [], GC_BASE
@@ -124,9 +169,30 @@ def build(region, dol=None, usa_dol=None):
         raise SystemExit('%s: KPADRead entry 0x%08X does not match the USA one' % (region, site))
     if orig_word >> 16 != 0x9421:
         raise SystemExit('%s: KPADRead entry 0x%08X is 0x%08X, not a stwu' % (region, site, orig_word))
-    words = asm.words(asm.assemble(_read('gc_poll.s'), cur, syms, dict(ORIG=orig_word))) + [0]
+    poll = _read('gc_macros.s') + '\n' + _read('gc_poll.s')
+    if 'index' not in fake:          # only the old KPAD reads WPAD's ring (Cars)
+        i, j = poll.index('    # A pad-only channel'), poll.index('done:\n')
+        poll = poll[:i] + poll[j:]
+    words = asm.words(asm.assemble(poll, cur, syms, dict(consts_poll, ORIG=orig_word))) + [0]
     ops.append(Hook(site, orig_word, words, cur, note='KPADRead entry: keep the GameCube ports probed and polled'))
     cur += (len(words) * 4 + 15) & ~15
+    for name, src, note in (('probe', 'gc_probe.s', 'WPADProbe: a GameCube pad with no Wii Remote counts as a controller'),
+                            ('index', 'gc_index.s', 'WPAD ring index: the samples written for a pad-only channel'),
+                            ('dpd', 'gc_dpd.s', 'WPADIsDpdEnabled: a pad-only channel matches what KPAD wants'),
+                            ('ring', 'gc_ring.s', 'KPADRead: queue Classic Controller samples for a pad-only channel')):
+        if name in fake:
+            fn = fake[name]
+            w0 = _word(dol, fn)
+            if name == 'ring':
+                if w0 != 0x88000000 | (wpad['c']['KREG'] << 16) | wpad['c']['RCOUNT']:
+                    raise SystemExit('%s: 0x%08X is not lbz r0,0x%X(r%d)'
+                                     % (region, fn, wpad['c']['RCOUNT'], wpad['c']['KREG']))
+            elif w0 >> 16 != 0x9421:
+                raise SystemExit('%s: 0x%08X does not start with a stwu' % (region, fn))
+            body = asm.words(asm.assemble(_read('gc_macros.s') + '\n' + _read(src), cur, syms,
+                                          dict(consts_poll, ORIG=w0))) + [0]
+            ops.append(Hook(fn, w0, body, cur, note=note))
+            cur += (len(body) * 4 + 15) & ~15
     for src, sites, note, needs_helpers in game['hooks']:
         for usa_site in sites:
             site = usa_site + shift

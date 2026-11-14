@@ -25,7 +25,14 @@
     cmpwi   \tmp, 0
     bne     \fail                       # not a standard pad
     mulli   \base, \chan, 12
+    .ifdef DEBUG_FEED
+    # test builds only: the pad answer comes from RAM at DEBUG_FEED (+4 INBUFH,
+    # +8 INBUFL, 12 per port), written by a debugger
+    addis   \base, \base, (DEBUG_FEED - 0x6400)@ha
+    addi    \base, \base, (DEBUG_FEED - 0x6400)@l
+    .else
     addis   \base, \base, 0xCD00
+    .endif
     lwz     \hi, 0x6404(\base)
     cmpwi   \hi, 0
     blt     \fail                       # error / no pad
@@ -99,3 +106,4 @@
     mulli   \dst, \dst, 754                # x / 0x570 for the four multiples of 0x570
     srwi    \dst, \dst, 16
     .endm
+

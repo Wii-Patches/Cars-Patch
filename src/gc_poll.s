@@ -135,6 +135,46 @@ en:
     or      11, 11, 7
     stw     11, 4(6)
 
+
+    # A pad-only channel (no Wii Remote, see gc_probe.s): KPAD has asked WPAD
+    # to set the "remote" up and waits for callbacks a missing remote never
+    # sends, so drop those waits, then put one blank sample (no buttons, no
+    # pointer) into the ring KPAD registered with WPAD and advance the index
+    # gc_index.s reports.  The pad hooks fill the sample in as KPAD reads it.
+    lwz     3, 0x08(1)
+    cmplwi  3, 3
+    bgt     done
+    PADREAD 3, 9, 8, 10, done
+    lis     12, WPCB@ha
+    addi    12, 12, WPCB@l
+    slwi    11, 3, 2
+    lwzx    12, 12, 11
+    lwz     0, WPSTAT(12)
+    cmpwi   0, -1
+    bne     done
+    lis     12, KBASE@ha
+    addi    12, 12, KBASE@l
+    mulli   11, 3, KSTRIDE
+    add     12, 12, 11              # this channel's KPAD struct
+    li      0, 0
+    stw     0, KWAIT1(12)
+    stw     0, KWAIT2(12)
+    lis     9, STATE@ha
+    addi    9, 9, STATE@l + 0x14
+    lbzx    10, 9, 3
+    addi    10, 10, 1
+    cmplwi  10, RINGN
+    blt     1f
+    li      10, 0
+1:  mulli   11, 10, SSIZE
+    add     11, 11, 12
+    addi    11, 11, RINGOFF - 1     # this sample - 1
+    li      8, SSIZE
+    mtctr   8
+2:  stbu    0, 1(11)
+    bdnz    2b
+    stbx    10, 9, 3                # publish the index last
+
 done:
     lwz     0, 0x24(1)
     mtlr    0

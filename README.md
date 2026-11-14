@@ -21,8 +21,7 @@ Full analog **Classic Controller** support, **GameCube controller** support, a P
   - Power slide on R trigger, tilt vehicle on L trigger, and boost / nitro on ZR.
   - Motion shake actions (such as Jump) mapped cleanly to **ZL** / **C-Stick**.
 - **GameCube Controller**:
-  - Pads in GameCube ports 1–4 drive Wii Remote channels 1–4.
-  - **A Wii Remote must still be connected on that channel** (no extension): the games only read a player whose remote is there. The pad stands in for a Classic Controller on it.
+  - Pads in GameCube ports 1–4 drive player channels 1–4, **with no Wii Remote needed**. A channel with a real Wii Remote keeps using it; a pad next to a bare remote acts as its Classic Controller.
   - The patch keeps the ports probed and polled itself (none of the three games links the SDK's `PAD` library), so a pad also works on a real Wii and can be re-plugged.
 - **Cars 1: Skip Pitstop Motions**:
   - Automatically satisfies the motion-controlled pitstop tune-up QTE minigames in Piston Cup races, allowing 100% completion with traditional controllers.

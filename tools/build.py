@@ -25,7 +25,7 @@ CREDIT = {
 BLURB = {
     'cc': ['Play with a Classic Controller (or Pro): left stick steers, ZL / the C-stick jumps.',
            'Needs a Wii Remote with a Classic Controller attached.'],
-    'gc': ['Play with a GameCube controller in ports 1-4 (a Wii Remote must still be connected).',
+    'gc': ['Play with a GameCube controller in ports 1-4, with or without a Wii Remote.',
            'Needs the Classic Controller code above as well: enable both.'],
     'pitstop': ['The Piston Cup pitstop minigames count their motion prompts as done.',
                 'Needed to finish the game with a Classic Controller or GameCube pad.'],

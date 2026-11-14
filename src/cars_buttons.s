@@ -12,10 +12,10 @@
     cmplwi  6, 3
     bgt     9f
     PADREAD 6, 8, 5, 11, 9f
-    srwi    3, 8, 16                    # PAD buttons
+    srwi    9, 8, 16                    # PAD buttons (r3, the KPAD struct, is still needed)
     li      10, 0
     .macro  MAPB src, dst
-    andi.   11, 3, \src
+    andi.   11, 9, \src
     beq     1f
     ori     10, 10, \dst
 1:

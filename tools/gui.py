@@ -56,7 +56,7 @@ class App(BASE):
         self.cc_cb = tk.Checkbutton(opts, text='Classic Controller', variable=self.cc)
         self.cc_cb.pack(anchor='w')
         self.gc = tk.BooleanVar(value=True)
-        tk.Checkbutton(opts, text='GameCube controller (ports 1-4; a Wii Remote must stay connected)',
+        tk.Checkbutton(opts, text='GameCube controller (ports 1-4, no Wii Remote needed)',
                        variable=self.gc, command=self.sync_cc).pack(anchor='w')
         self.sync_cc()
         self.pitstop = tk.BooleanVar(value=True)

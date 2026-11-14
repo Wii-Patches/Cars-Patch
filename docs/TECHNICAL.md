@@ -28,7 +28,7 @@ the games never touch after boot (`tools/layout.py`):
 | `0x80001820-0x80002000` | Classic Controller hooks |
 | `0x80002000-0x80002200` | Widescreen fix hooks (Cars) |
 | `0x80002200-0x80002FC0` | GameCube controller hooks |
-| `0x80002FC0-0x80002FD4` | SI poller state (probe time stamps, NOREP counters) |
+| `0x80002FC0-0x80002FD8` | Pad state (probe time stamps, NOREP counters, Cars ring indices) |
 
 A loader's own Gecko code handler also lives in this area, so the Gecko codes
 should not be combined with a loader's cheat engine on a real Wii; the patched
@@ -100,7 +100,8 @@ as `0x09000000` and the empty ports as 8.
 ### Feeding the game
 
 Port N feeds KPAD channel N. The pad makes the channel look like a Wii Remote
-with a Classic Controller, so Vague Rant's Classic Controller code does the rest:
+with a Classic Controller, so Vague Rant's Classic Controller code does the rest.
+With a real Wii Remote on the channel:
 
 - **Cars, Mater-National:** in the KPAD read loop, around the call that turns a
   sample into acceleration data, the channel's extension type is set to 2 while
@@ -112,10 +113,55 @@ with a Classic Controller, so Vague Rant's Classic Controller code does the rest
   controller-type table: a bare remote with a pad is recorded as a Classic
   Controller (`ror_type.s`).
 
-### Known limitation: a Wii Remote is still needed
+### Without a Wii Remote
 
-KPAD only produces samples for a channel whose remote is connected
-(`KPADRead` returns early for device type 253 / a negative channel state), and
-Cars stops at "Press the + Button" with only a pad. Playing without any remote
-would need WPAD-level faking (`WPADProbe`, the WPAD sample ring KPAD copies
-from) for three KPAD versions plus each game's own connection checks.
+KPAD only produces samples for a channel WPAD reports as connected, so for a
+channel whose WPAD status is "no controller" (-1) while a confirmed pad answers
+on the matching port, the patch fakes the WPAD side. A real remote always wins,
+and unplugging the pad makes the channel disconnect as usual.
+
+**Cars (older KPAD).** KPAD reads WPAD's own auto-sampling ring (12 × 0x2A
+bytes at KPAD `+0x118`, struct stride `0x400`):
+
+- `WPADProbe` (`gc_probe.s`) returns 0 with type 0, a bare Wii Remote; the
+  existing pad hooks then make it a Classic Controller.
+- The WPAD call that returns the ring's newest index (`gc_index.s`) returns the
+  index of the sample written by the poller.
+- `WPADIsDpdEnabled` (`gc_dpd.s`) answers whatever KPAD wants (`+0x3EC`);
+  otherwise KPAD re-runs its remote setup every frame and never returns samples.
+- The poller clears KPAD's "waiting for WPAD" flags (`+0x3F4`, `+0x3FC`), which
+  only a real remote's callbacks would clear, and writes one blank sample per
+  frame into the ring.
+
+**Mater-National, Race-O-Rama (newer KPAD).** KPAD keeps its own 16-entry ring
+of 0x38-byte samples, filled by a WPAD sampling callback:
+
+| | ring | next index | count | struct stride |
+| :--- | :--- | :--- | :--- | :--- |
+| Mater-National | `+0x110` | `+0x10E` | `+0x10F` | `0x524` |
+| Race-O-Rama | `+0x13C` | `+0x13A` | `+0x13B` | `0x570` |
+
+- `WPADProbe` returns 0 with type 2, a Classic Controller (Race-O-Rama drops
+  samples whose device byte differs from the probed type).
+- At KPADRead's load of the count (`gc_ring.s`), two fresh blank Classic
+  Controller samples (`+0x28` = 2, `+0x36` = 8) are queued every read
+  (Race-O-Rama only reads with two or more queued). The pad hooks fill in the
+  buttons and sticks.
+
+WPADProbe, the ring-index call, `WPADIsDpdEnabled` and the ring check are
+found in each release by signature from the USA addresses; the WPAD
+control-block table and channel 0's KPAD struct are read from the first
+`lis`/`addi` pair of WPADProbe and KPADRead.
+
+**Checked in Dolphin, pad only.** A test build (`CARS_DEBUG_FEED=80002FE0
+tools/gen_prebuilt.py gc`) makes the hooks read the pad answer from RAM, which a
+script writes over Dolphin's GDB stub. With it, Cars went from the strap screen
+through the menus into a race and drove; Mater-National reached New Game and
+name entry; Race-O-Rama passed "Press +" into its profile and name entry. With
+the normal build, the pad-only channel connects through the real SI path, but
+Dolphin's input movies do not drive a Wii game's GameCube port, so presses
+through real SI were not exercised there. Not yet tried on a console.
+
+Fixed on the way: Cars' button hook overwrote r3 (the KPAD struct) with the
+pad's buttons and stored the result through it, so GameCube buttons never
+reached Cars at all, with or without a remote.
